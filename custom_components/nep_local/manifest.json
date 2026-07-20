@@ -1,13 +1,13 @@
 {
+  "domain": "nep_local",
+  "name": "NEP Local",
   "codeowners": ["@FtlC-ian"],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/FtlC-ian/ha-nep-local",
-  "domain": "nep_local",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/FtlC-ian/ha-nep-local/issues",
-  "name": "NEP Local",
   "requirements": [],
   "version": "0.1.0"
 }
