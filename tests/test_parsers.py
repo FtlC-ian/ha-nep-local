@@ -13,7 +13,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def test_inventory_reads_gateway_box_addr_and_raw_m_id() -> None:
     modules = parse_inventory_page((FIXTURES / "inventory.html").read_text())
     assert [(module.raw_id, module.address) for module in modules] == [
-        ("REDACTED_MODULE_A", "9"), ("REDACTED_MODULE_B", "17")
+        (f"REDACTED_MODULE_{address:02d}", str(address)) for address in range(1, 13)
     ]
 
 
@@ -42,6 +42,12 @@ def test_min_dat_parses_complete_whitespace_records_and_normalizes_units() -> No
     # The final complete line is the most current sample.
     assert records[-1].timestamp == "2026-07-20 12:05:00"
     assert records[-1].status_code == "8000"
+    # Historical/inactive modules retain their original data; only the invalid
+    # temperature sentinel becomes missing.
+    assert records[-1].firmware == "0"
+    assert records[-1].temperature_c is None
+    assert records[-1].power_w == 0.0
+    assert records[-1].energy_wh == 0.0
 
 
 def test_min_dat_skips_malformed_complete_record_before_current_sample() -> None:

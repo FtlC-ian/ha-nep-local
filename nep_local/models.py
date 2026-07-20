@@ -56,7 +56,8 @@ class MinDatRecord:
     voltage_ac_v: float
     current_a: float
     frequency_hz: float
-    temperature_c: float
+    # The gateway uses -100 as an unavailable-temperature sentinel.
+    temperature_c: float | None
     energy_wh: float
     rssi: float
     firmware: str

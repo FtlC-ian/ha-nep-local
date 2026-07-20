@@ -11,6 +11,7 @@ from .models import AggregateReading, InventoryModule, MinDatRecord, ModuleReadi
 
 _MODULE_ID_RE = re.compile(r"(?:^|\s)M_ID\s*:\s*([^\s]+)", re.I)
 _STATUS_RE = re.compile(r"^[0-9a-fA-F]+$")
+_TEMPERATURE_UNAVAILABLE = -100.0
 
 
 def _number(value: Any, field: str) -> float | None:
@@ -33,6 +34,12 @@ def _status(value: Any, field: str) -> str | None:
     if not _STATUS_RE.fullmatch(status):
         raise NepInvalidResponse(f"{field} must be a hexadecimal status string")
     return status.upper().zfill(4)
+
+
+def _temperature(value: str) -> float | None:
+    """Normalize the gateway's unavailable-temperature sentinel to missing."""
+    temperature = float(value)
+    return None if temperature == _TEMPERATURE_UNAVAILABLE else temperature
 
 
 class _InventoryBoxParser(HTMLParser):
@@ -117,7 +124,7 @@ def parse_min_dat(payload: str) -> list[MinDatRecord]:
                 timestamp=f"{fields[0]} {fields[1]}", power_w=float(fields[2]) * 1000,
                 voltage_dc_v=float(fields[3]), voltage_ac_v=float(fields[4]),
                 current_a=float(fields[5]), frequency_hz=float(fields[6]),
-                temperature_c=float(fields[7]), energy_wh=float(fields[8]) * 1000,
+                temperature_c=_temperature(fields[7]), energy_wh=float(fields[8]) * 1000,
                 rssi=float(fields[9]), firmware=fields[10],
                 status_code=_status(fields[11], "min.dat status") or "",
             ))
