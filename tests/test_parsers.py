@@ -3,31 +3,67 @@ from pathlib import Path
 
 import pytest
 
-from nep_local.exceptions import NepInvalidResponse
-from nep_local.models import ModuleStatus
-from nep_local.parsers import parse_aggregate_json, parse_inventory_page, parse_min_dat, parse_module_json
+from custom_components.nep_local.exceptions import NepInvalidResponse
+from custom_components.nep_local.models import ModuleStatus
+from custom_components.nep_local.parsers import (
+    parse_aggregate_json,
+    parse_inventory_page,
+    parse_min_dat,
+    parse_module_json,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_inventory_reads_gateway_box_addr_and_raw_m_id() -> None:
-    modules = parse_inventory_page((FIXTURES / "inventory.html").read_text())
-    assert [(module.raw_id, module.address) for module in modules] == [
-        (f"REDACTED_MODULE_{address:02d}", str(address)) for address in range(1, 13)
+    inventory = parse_inventory_page((FIXTURES / "inventory.html").read_text())
+    assert inventory.serial == "TESTGW000001"
+    assert [module.address for module in inventory.modules] == [
+        "1",
+        "2",
+        "3",
+        "4",
+        "9",
+        "10",
     ]
+    assert inventory.modules[0].raw_id == "0XAAA00010"
+    assert inventory.physical_inverter_id(
+        inventory.modules[0]
+    ) == inventory.physical_inverter_id(inventory.modules[1])
+
+
+def test_inventory_does_not_drop_zero_production_or_historical_addresses() -> None:
+    boxes = "".join(
+        f'<div class="box" addr="{address}" title="M_ID:0X{address:08X}"></div>'
+        for address in range(1, 13)
+    )
+    inventory = parse_inventory_page(
+        f"<table><tr><td>Gateway</td><td>TESTGW000001</td></tr></table>{boxes}"
+    )
+    assert len(inventory.modules) == 12
 
 
 def test_realdata_units_are_w_and_wh_and_zero_is_not_missing() -> None:
-    reading = parse_aggregate_json(json.loads((FIXTURES / "aggregate.json").read_text()))
-    assert (reading.power_w, reading.today_wh, reading.total_wh, reading.status_code) == (0.0, 0.0, 123456.0, "0000")
+    reading = parse_aggregate_json(
+        json.loads((FIXTURES / "aggregate.json").read_text())
+    )
+    assert (
+        reading.power_w,
+        reading.today_wh,
+        reading.total_wh,
+        reading.status_code,
+    ) == (0.0, 0.0, 123456.0, "0000")
     assert parse_aggregate_json({"now": ""}).power_w is None
 
 
 def test_status_8000_is_low_light_not_transport_failure() -> None:
-    reading = parse_module_json(json.loads((FIXTURES / "module_low_light.json").read_text()), address="9", raw_id="REDACTED_MODULE_A")
+    reading = parse_module_json(
+        json.loads((FIXTURES / "module_low_light.json").read_text()),
+        address="9",
+        raw_id="REDACTED_MODULE_A",
+    )
     assert reading.status is ModuleStatus.LOW_LIGHT
     assert reading.status_code == "8000"
-    assert reading.transport_healthy is True
     assert reading.power_w == 0.0
     assert reading.total_wh == 12345.0
 
@@ -44,10 +80,13 @@ def test_min_dat_parses_complete_whitespace_records_and_normalizes_units() -> No
     assert records[-1].status_code == "8000"
     # Historical/inactive modules retain their original data; only the invalid
     # temperature sentinel becomes missing.
-    assert records[-1].firmware == "0"
+    assert records[-1].diagnostic_code == "0"
     assert records[-1].temperature_c is None
     assert records[-1].power_w == 0.0
     assert records[-1].energy_wh == 0.0
+    assert records[-1].voltage_dc_v is None
+    assert records[-1].voltage_ac_v is None
+    assert records[-1].frequency_hz is None
 
 
 def test_min_dat_skips_malformed_complete_record_before_current_sample() -> None:

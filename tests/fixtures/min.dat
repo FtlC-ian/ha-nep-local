@@ -1,4 +1,4 @@
-# Complete records use: date time kW Vdc Vac A Hz C kWh RSSI firmware status
-2026-07-20 12:00:00 0.123 37.5 230.1 0.54 60.0 42.3 12.345 -68 FW_REDACTED 0000
+# Complete records use: date time kW Vdc Vac A Hz C kWh RSSI diagnostic status
+2026-07-20 12:00:00 0.123 37.5 230.1 0.54 60.0 42.3 12.345 -68 8B05 0000
 this truncated record is deliberately ignored
 2026-07-20 12:05:00 0 0 0 0 0 -100 0 1 0 8000

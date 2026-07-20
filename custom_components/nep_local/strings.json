@@ -1,0 +1,50 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This gateway is already configured",
+      "reconfigure_successful": "The gateway was reconfigured successfully"
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_response": "The device did not return a valid NEP gateway response",
+      "wrong_gateway": "This address belongs to a different NEP gateway"
+    },
+    "step": {
+      "reconfigure": {
+        "data": {"host": "Host"},
+        "description": "Update the address of this NEP gateway"
+      },
+      "user": {
+        "data": {"host": "Host"},
+        "description": "Enter the local IP address or hostname of the NEP gateway"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "gateway_lifetime_energy": {"name": "Lifetime energy"},
+      "gateway_power": {"name": "Power"},
+      "gateway_today_energy": {"name": "Today energy"},
+      "module_ac_voltage": {"name": "Channel {channel} AC voltage"},
+      "module_current": {"name": "Channel {channel} current"},
+      "module_dc_voltage": {"name": "Channel {channel} DC voltage"},
+      "module_diagnostic_code": {"name": "Channel {channel} diagnostic code"},
+      "module_frequency": {"name": "Channel {channel} frequency"},
+      "module_lifetime_energy": {"name": "Channel {channel} lifetime energy"},
+      "module_power": {"name": "Channel {channel} power"},
+      "module_rssi": {"name": "Channel {channel} RSSI index"},
+      "module_status": {
+        "name": "Channel {channel} status",
+        "state": {
+          "fault": "Fault",
+          "low_light": "Low light",
+          "ok": "OK",
+          "unknown": "Unknown"
+        }
+      },
+      "module_temperature": {"name": "Channel {channel} temperature"},
+      "module_today_energy": {"name": "Channel {channel} today energy"}
+    }
+  },
+  "title": "NEP Local"
+}
