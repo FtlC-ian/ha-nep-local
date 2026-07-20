@@ -43,6 +43,22 @@ def test_inventory_does_not_drop_zero_production_or_historical_addresses() -> No
     assert len(inventory.modules) == 12
 
 
+def test_physical_device_id_is_stable_before_and_after_mate_discovery() -> None:
+    first = parse_inventory_page(
+        "<table><tr><td>Gateway</td><td>TESTGW000001</td></tr></table>"
+        '<div class="box" addr="9" title="M_ID:0XAAA00051"></div>'
+    )
+    with_mate = parse_inventory_page(
+        "<table><tr><td>Gateway</td><td>TESTGW000001</td></tr></table>"
+        '<div class="box" addr="9" title="M_ID:0XAAA00051"></div>'
+        '<div class="box" addr="10" title="M_ID:0XAAA00050"></div>'
+    )
+    assert first.physical_inverter_id(first.modules[0]) == "0XAAA00050"
+    assert {with_mate.physical_inverter_id(module) for module in with_mate.modules} == {
+        "0XAAA00050"
+    }
+
+
 def test_realdata_units_are_w_and_wh_and_zero_is_not_missing() -> None:
     reading = parse_aggregate_json(
         json.loads((FIXTURES / "aggregate.json").read_text())
@@ -107,3 +123,12 @@ def test_malformed_responses_raise_instead_of_using_fabricated_shapes() -> None:
         parse_min_dat("2026-07-20 12:00:00 missing fields")
     with pytest.raises(NepInvalidResponse):
         parse_module_json({"status": "not-hex"}, address="9", raw_id="id")
+    with pytest.raises(NepInvalidResponse):
+        parse_inventory_page(
+            "<table><tr><td>Gateway</td><td>TESTGW000001</td></tr></table>"
+            '<div class="box" addr="nine" title="M_ID:0XAAA00050"></div>'
+        )
+    with pytest.raises(NepInvalidResponse):
+        parse_aggregate_json({"now": "nan"})
+    with pytest.raises(NepInvalidResponse):
+        parse_min_dat("2026-07-20 12:00:00 nan 37 230 0.4 60 40 1 -70 0 0000")

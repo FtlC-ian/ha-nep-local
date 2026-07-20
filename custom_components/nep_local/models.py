@@ -41,19 +41,8 @@ class GatewayInventory:
     modules: tuple[InventoryModule, ...]
 
     def physical_inverter_id(self, module: InventoryModule) -> str:
-        """Pair inputs only when the inventory proves a low-bit channel pair."""
-        candidates = [
-            candidate
-            for candidate in self.modules
-            if candidate.inverter_id == module.inverter_id
-        ]
-        if len(candidates) != 2:
-            return module.raw_id
-        try:
-            values = {int(candidate.raw_id, 16) for candidate in candidates}
-        except ValueError:
-            return module.raw_id
-        return module.inverter_id if len(values) == 2 else module.raw_id
+        """Return an inventory-independent physical inverter identifier."""
+        return module.inverter_id
 
 
 @dataclass(frozen=True)

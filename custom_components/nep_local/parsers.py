@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from html.parser import HTMLParser
+import math
 from typing import Any
 
 from .exceptions import NepInvalidResponse
@@ -34,9 +35,23 @@ def parse_optional_number(value: Any, field: str) -> float | None:
     if isinstance(value, bool):
         raise NepInvalidResponse(f"{field} must be numeric")
     try:
-        return float(str(value).strip().replace(",", ""))
+        number = float(str(value).strip().replace(",", ""))
     except (TypeError, ValueError) as error:
         raise NepInvalidResponse(f"{field} must be numeric") from error
+    if not math.isfinite(number):
+        raise NepInvalidResponse(f"{field} must be finite")
+    return number
+
+
+def _finite(value: str, field: str) -> float:
+    """Parse one finite min.dat number."""
+    try:
+        number = float(value)
+    except ValueError as error:
+        raise NepInvalidResponse(f"{field} must be numeric") from error
+    if not math.isfinite(number):
+        raise NepInvalidResponse(f"{field} must be finite")
+    return number
 
 
 def _status(value: Any, field: str) -> str | None:
@@ -86,6 +101,8 @@ def parse_inventory_page(payload: str) -> GatewayInventory:
         address = attrs.get("addr", "").strip()
         raw_id_match = _MODULE_ID_RE.search(attrs.get("title", ""))
         if address and raw_id_match:
+            if not address.isdecimal() or int(address) <= 0:
+                raise NepInvalidResponse("module address must be a positive integer")
             raw_id = raw_id_match.group(1).strip().upper()
             found[raw_id] = InventoryModule(address=address, raw_id=raw_id)
     if not found:
@@ -148,23 +165,29 @@ def parse_min_dat(payload: str) -> list[MinDatRecord]:
         try:
             status_code = _status(fields[11], "min.dat status") or ""
             low_light = status_code == "8000"
-            temperature = float(fields[7])
+            temperature = _finite(fields[7], "min.dat temperature")
             records.append(
                 MinDatRecord(
                     timestamp=f"{fields[0]} {fields[1]}",
-                    power_w=float(fields[2]) * 1000,
-                    voltage_dc_v=None if low_light else float(fields[3]),
-                    voltage_ac_v=None if low_light else float(fields[4]),
-                    current_a=float(fields[5]),
-                    frequency_hz=None if low_light else float(fields[6]),
+                    power_w=_finite(fields[2], "min.dat power") * 1000,
+                    voltage_dc_v=(
+                        None if low_light else _finite(fields[3], "min.dat DC voltage")
+                    ),
+                    voltage_ac_v=(
+                        None if low_light else _finite(fields[4], "min.dat AC voltage")
+                    ),
+                    current_a=_finite(fields[5], "min.dat current"),
+                    frequency_hz=(
+                        None if low_light else _finite(fields[6], "min.dat frequency")
+                    ),
                     temperature_c=None if temperature <= -50 else temperature,
-                    energy_wh=float(fields[8]) * 1000,
-                    rssi=float(fields[9]),
+                    energy_wh=_finite(fields[8], "min.dat energy") * 1000,
+                    rssi=_finite(fields[9], "min.dat RSSI"),
                     diagnostic_code=fields[10],
                     status_code=status_code,
                 )
             )
-        except (ValueError, NepInvalidResponse):
+        except NepInvalidResponse:
             continue
     if not records:
         raise NepInvalidResponse("min.dat contains no complete records")

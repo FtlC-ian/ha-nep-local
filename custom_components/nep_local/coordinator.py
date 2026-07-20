@@ -70,6 +70,10 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         aggregate = results[0] if isinstance(results[0], AggregateReading) else None
+        if isinstance(results[0], Exception):
+            _LOGGER.debug(
+                "Aggregate endpoint failed with %s", type(results[0]).__name__
+            )
         modules: dict[str, ModuleData] = {}
         successful_readings = int(aggregate is not None)
         for index, module in enumerate(inventory.modules):
@@ -81,6 +85,16 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
             telemetry = (
                 telemetry_result if isinstance(telemetry_result, MinDatRecord) else None
             )
+            if isinstance(reading_result, Exception):
+                _LOGGER.debug(
+                    "Module live endpoint failed with %s",
+                    type(reading_result).__name__,
+                )
+            if isinstance(telemetry_result, Exception):
+                _LOGGER.debug(
+                    "Module telemetry endpoint failed with %s",
+                    type(telemetry_result).__name__,
+                )
             successful_readings += int(reading is not None or telemetry is not None)
             modules[module.raw_id] = ModuleData(reading=reading, telemetry=telemetry)
 
