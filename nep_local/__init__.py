@@ -1,7 +1,7 @@
 """Local-only protocol support for NEP photovoltaic gateways.
 
-This package deliberately contains no Home Assistant imports.  The HA
-integration layer can depend on these small, testable protocol primitives.
+These protocol primitives are staging code for the future Home Assistant
+custom component; no standalone package metadata is shipped.
 """
 
 from .client import EndpointPaths, NepGatewayClient
