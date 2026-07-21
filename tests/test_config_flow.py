@@ -27,7 +27,7 @@ async def test_user_flow_creates_entry_with_gateway_serial(hass) -> None:
         )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {CONF_HOST: "192.0.2.10"}
+    assert result["data"] == {CONF_HOST: "http://192.0.2.10"}
     assert result["result"].unique_id == "TESTGW000001"
 
 

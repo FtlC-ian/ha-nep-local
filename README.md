@@ -12,6 +12,8 @@ This project is early alpha software tested against one gateway. Gateway firmwar
 
 The integration creates one gateway device and groups logical input channels under their physical microinverter when the gateway's `M_ID` scheme makes that pairing unambiguous. Newly reported channels are added automatically. Channels are retained at night and when they report zero production.
 
+Power, DC voltage, current, energy, and status remain per input channel. AC voltage, grid frequency, and temperature are published once per physical inverter because both inputs share the same AC connection and enclosure.
+
 ## Data behavior
 
 - Power is reported in watts.
@@ -19,6 +21,8 @@ The integration creates one gateway device and groups logical input channels und
 - Daily energy is a resetting total; lifetime energy is a non-resetting total.
 - NEP status `8000` means low light. It is a valid response and does not make a device unavailable.
 - Missing or invalid telemetry is not converted to zero.
+- Rich `min.dat` telemetry older than 15 minutes is treated as unavailable.
+- Fresh `min.dat` daily energy backs up the live daily-energy value; lifetime energy remains live-endpoint only.
 - The gateway's `-100 °C` unavailable-temperature sentinel is not published as a temperature.
 
 ## Support

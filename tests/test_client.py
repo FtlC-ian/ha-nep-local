@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from custom_components.nep_local.client import NepGatewayClient
@@ -38,7 +40,6 @@ async def test_client_uses_actual_gateway_paths_and_cachebuster() -> None:
             ),
             _Response(200, '{"addr":"0","now":0,"today":0,"total":0,"status":"0000"}'),
             _Response(200, '{"addr":"9","now":0,"today":0,"total":0,"status":"0000"}'),
-            _Response(200, '{"t":1784566931,"td":0,"tt":12345}'),
         ]
     )
     client = NepGatewayClient(session, "http://gateway.invalid")
@@ -46,17 +47,11 @@ async def test_client_uses_actual_gateway_paths_and_cachebuster() -> None:
     await client.inventory()
     await client.aggregate()
     await client.module(InventoryModule(address="9", raw_id="REDACTED_MODULE_A"))
-    totals = await client.totals(
-        InventoryModule(address="9", raw_id="REDACTED_MODULE_A")
-    )
     assert session.requests == [
         ("http://gateway.invalid/nep/status/index/", None),
         ("http://gateway.invalid/nep/static/local/0_status/cache-token", None),
         ("http://gateway.invalid/nep/static/local/9_status/cache-token", None),
-        ("http://gateway.invalid/nep/realdata/tt/9/cache-token", None),
     ]
-    assert totals.today_wh == 0
-    assert totals.total_wh == 12345
 
 
 @pytest.mark.asyncio
@@ -68,3 +63,29 @@ async def test_client_uses_addressed_min_dat_and_raises_for_empty_response() -> 
     assert session.requests == [
         ("http://gateway.invalid/data/9/min.dat", {"Range": "bytes=-1024"})
     ]
+
+
+@pytest.mark.asyncio
+async def test_client_limits_parallel_gateway_requests() -> None:
+    active = 0
+    peak_active = 0
+
+    class _SlowResponse(_Response):
+        async def __aenter__(self):
+            nonlocal active, peak_active
+            active += 1
+            peak_active = max(peak_active, active)
+            await asyncio.sleep(0.01)
+            return self
+
+        async def __aexit__(self, *_):
+            nonlocal active
+            active -= 1
+            return False
+
+    session = _Session([_SlowResponse(200, "ok") for _ in range(8)])
+    client = NepGatewayClient(session, "http://gateway.invalid")
+
+    await asyncio.gather(*(client._get_text(f"/{index}") for index in range(8)))
+
+    assert peak_active == 4

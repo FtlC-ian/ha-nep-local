@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from time import time
 from urllib.parse import quote
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
+from .const import MAX_CONCURRENT_REQUESTS
 from .exceptions import NepConnectionError, NepInvalidResponse, NepResponseMissing
 from .models import (
     AggregateReading,
@@ -21,12 +23,10 @@ from .parsers import (
     parse_inventory_page,
     parse_min_dat,
     parse_module_json,
-    parse_optional_number,
 )
 
 INVENTORY_PATH = "/nep/status/index/"
 STATUS_PATH = "/nep/static/local/{address}_status/{cachebuster}"
-TOTALS_PATH = "/nep/realdata/tt/{address}/{cachebuster}"
 MIN_DAT_PATH = "/data/{address}/min.dat"
 REQUEST_TIMEOUT = ClientTimeout(total=10)
 
@@ -39,6 +39,7 @@ class NepGatewayClient:
             raise ValueError("base_url must include http:// or https://")
         self._session = session
         self._base_url = base_url.rstrip("/")
+        self._request_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
     def _url(self, path: str) -> str:
         return f"{self._base_url}/{path.lstrip('/')}"
@@ -47,14 +48,15 @@ class NepGatewayClient:
         self, path: str, *, headers: dict[str, str] | None = None
     ) -> str:
         try:
-            async with self._session.get(
-                self._url(path), headers=headers, timeout=REQUEST_TIMEOUT
-            ) as response:
-                if response.status in (204, 404):
-                    raise NepResponseMissing(f"{path}: HTTP {response.status}")
-                if response.status >= 400:
-                    raise NepInvalidResponse(f"{path}: HTTP {response.status}")
-                text = await response.text()
+            async with self._request_semaphore:
+                async with self._session.get(
+                    self._url(path), headers=headers, timeout=REQUEST_TIMEOUT
+                ) as response:
+                    if response.status in (204, 404):
+                        raise NepResponseMissing(f"{path}: HTTP {response.status}")
+                    if response.status >= 400:
+                        raise NepInvalidResponse(f"{path}: HTTP {response.status}")
+                    text = await response.text()
         except (TimeoutError, ClientError) as error:
             raise NepConnectionError(f"cannot connect to {self._base_url}") from error
         if not text.strip():
@@ -85,21 +87,6 @@ class NepGatewayClient:
         )
         return parse_module_json(
             await self._get_json(path), address=module.address, raw_id=module.raw_id
-        )
-
-    async def totals(self, module: InventoryModule | None = None) -> AggregateReading:
-        """Read the gateway's compact t/td/tt energy endpoint."""
-        address = module.address if module else "0"
-        path = TOTALS_PATH.format(
-            address=quote(address, safe=""), cachebuster=self._cachebuster()
-        )
-        payload = await self._get_json(path)
-        if not isinstance(payload, dict):
-            raise NepInvalidResponse(f"{path}: response must be an object")
-        return AggregateReading(
-            today_wh=parse_optional_number(payload.get("td"), "totals td"),
-            total_wh=parse_optional_number(payload.get("tt"), "totals tt"),
-            raw=payload,
         )
 
     async def min_dat(self, module: InventoryModule) -> MinDatRecord:

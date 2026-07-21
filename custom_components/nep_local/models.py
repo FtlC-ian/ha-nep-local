@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -74,7 +75,7 @@ class ModuleReading:
 class MinDatRecord:
     """One complete min.dat record, normalized to W and Wh."""
 
-    timestamp: str
+    timestamp: datetime
     power_w: float | None
     voltage_dc_v: float | None
     voltage_ac_v: float | None

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -92,7 +93,7 @@ def test_min_dat_parses_complete_whitespace_records_and_normalizes_units() -> No
     assert records[0].voltage_dc_v == 37.5
     assert records[0].frequency_hz == 60.0
     # The final complete line is the most current sample.
-    assert records[-1].timestamp == "2026-07-20 12:05:00"
+    assert records[-1].timestamp == datetime(2026, 7, 20, 12, 5)
     assert records[-1].status_code == "8000"
     # Historical/inactive modules retain their original data; only the invalid
     # temperature sentinel becomes missing.
@@ -111,7 +112,18 @@ def test_min_dat_skips_malformed_complete_record_before_current_sample() -> None
         "2026-07-20 12:05:00 0.2 38 231 0.5 60 41 2 -71 FW 0000\n"
     )
     assert len(records) == 1
-    assert records[-1].timestamp == "2026-07-20 12:05:00"
+    assert records[-1].timestamp == datetime(2026, 7, 20, 12, 5)
+
+
+def test_inventory_skips_one_bad_module_when_valid_modules_remain(caplog) -> None:
+    inventory = parse_inventory_page(
+        "<table><tr><td>Gateway</td><td>TESTGW000001</td></tr></table>"
+        '<div class="box" addr="nine" title="M_ID:0XAAA00050"></div>'
+        '<div class="box" addr="9" title="M_ID:0XAAA00051"></div>'
+    )
+
+    assert [module.address for module in inventory.modules] == ["9"]
+    assert "Skipped 1 module inventory box" in caplog.text
 
 
 def test_malformed_responses_raise_instead_of_using_fabricated_shapes() -> None:

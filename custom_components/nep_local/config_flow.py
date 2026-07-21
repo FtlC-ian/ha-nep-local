@@ -25,7 +25,7 @@ async def _validate_host(hass: HomeAssistant, host: str) -> str:
 class NepLocalConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle NEP Local configuration."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -33,7 +33,7 @@ class NepLocalConfigFlow(ConfigFlow, domain=DOMAIN):
         """Configure a gateway by host or IP address."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            host = user_input[CONF_HOST].strip()
+            host = gateway_url(user_input[CONF_HOST])
             try:
                 serial = await _validate_host(self.hass, host)
             except NepConnectionError:
@@ -59,7 +59,7 @@ class NepLocalConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
         if user_input is not None:
-            host = user_input[CONF_HOST].strip()
+            host = gateway_url(user_input[CONF_HOST])
             try:
                 serial = await _validate_host(self.hass, host)
             except NepConnectionError:

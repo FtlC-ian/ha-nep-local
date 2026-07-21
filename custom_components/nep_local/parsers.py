@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from html.parser import HTMLParser
+import logging
 import math
 from typing import Any
 
@@ -27,6 +29,8 @@ _GATEWAY_TABLE_RE = re.compile(
 )
 _STATUS_RE = re.compile(r"^[0-9a-fA-F]+$")
 _MISSING = {"", "--", "N/A", "null"}
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def parse_optional_number(value: Any, field: str) -> float | None:
@@ -97,14 +101,21 @@ def parse_inventory_page(payload: str) -> GatewayInventory:
         raise NepInvalidResponse("gateway serial not found")
 
     found: dict[str, InventoryModule] = {}
+    invalid_boxes = 0
     for attrs in parser.boxes:
         address = attrs.get("addr", "").strip()
         raw_id_match = _MODULE_ID_RE.search(attrs.get("title", ""))
         if address and raw_id_match:
             if not address.isdecimal() or int(address) <= 0:
-                raise NepInvalidResponse("module address must be a positive integer")
+                invalid_boxes += 1
+                continue
             raw_id = raw_id_match.group(1).strip().upper()
             found[raw_id] = InventoryModule(address=address, raw_id=raw_id)
+    if invalid_boxes:
+        _LOGGER.warning(
+            "Skipped %s module inventory box(es) with invalid addresses",
+            invalid_boxes,
+        )
     if not found:
         raise NepInvalidResponse("no module inventory boxes found")
     modules = tuple(sorted(found.values(), key=lambda module: int(module.address)))
@@ -163,12 +174,16 @@ def parse_min_dat(payload: str) -> list[MinDatRecord]:
         if not fields or fields[0].startswith("#") or len(fields) != 12:
             continue
         try:
+            try:
+                timestamp = datetime.fromisoformat(f"{fields[0]} {fields[1]}")
+            except ValueError as error:
+                raise NepInvalidResponse("min.dat timestamp is invalid") from error
             status_code = _status(fields[11], "min.dat status") or ""
             low_light = status_code == "8000"
             temperature = _finite(fields[7], "min.dat temperature")
             records.append(
                 MinDatRecord(
-                    timestamp=f"{fields[0]} {fields[1]}",
+                    timestamp=timestamp,
                     power_w=_finite(fields[2], "min.dat power") * 1000,
                     voltage_dc_v=(
                         None if low_light else _finite(fields[3], "min.dat DC voltage")
