@@ -69,6 +69,20 @@ def _first_telemetry_value(
     )
 
 
+def _module_status_value(data: ModuleData) -> str | None:
+    """Reconcile live status with freshness-filtered module telemetry."""
+    reading = data.reading
+    if reading is None:
+        return None
+    if (
+        reading.status is ModuleStatus.OK
+        and data.telemetry is not None
+        and data.telemetry.status_code == "8000"
+    ):
+        return ModuleStatus.LOW_LIGHT.value
+    return reading.status.value
+
+
 GATEWAY_SENSORS = (
     NepGatewaySensorDescription(
         key="power",
@@ -159,7 +173,7 @@ MODULE_SENSORS = (
         options=[status.value for status in ModuleStatus],
         entity_category=EntityCategory.DIAGNOSTIC,
         requires_live=True,
-        value_fn=lambda data: data.reading.status.value if data.reading else None,
+        value_fn=_module_status_value,
     ),
     NepModuleSensorDescription(
         key="rssi",

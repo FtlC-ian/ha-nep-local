@@ -13,6 +13,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.nep_local import async_migrate_entry
 from custom_components.nep_local.client import NepGatewayClient
 from custom_components.nep_local.const import CONF_HOST, DOMAIN
+from custom_components.nep_local.coordinator import ModuleData
 from custom_components.nep_local.diagnostics import async_get_config_entry_diagnostics
 from custom_components.nep_local.models import (
     AggregateReading,
@@ -26,6 +27,7 @@ from custom_components.nep_local.sensor import (
     GATEWAY_SENSORS,
     INVERTER_SENSORS,
     MODULE_SENSORS,
+    _module_status_value,
 )
 
 
@@ -72,6 +74,34 @@ def _low_light_telemetry() -> MinDatRecord:
         rssi=1,
         diagnostic_code="0",
         status_code="8000",
+    )
+
+
+def test_status_prefers_low_light_telemetry_only_over_live_ok() -> None:
+    module = InventoryModule(address="9", raw_id="0XAAA00051")
+    telemetry = _low_light_telemetry()
+
+    live_ok = ModuleReading(
+        raw_id=module.raw_id,
+        address=module.address,
+        status_code="0000",
+        status=ModuleStatus.OK,
+    )
+    assert (
+        _module_status_value(ModuleData(reading=live_ok, telemetry=telemetry))
+        == "low_light"
+    )
+    assert _module_status_value(ModuleData(reading=live_ok, telemetry=None)) == "ok"
+
+    live_fault = ModuleReading(
+        raw_id=module.raw_id,
+        address=module.address,
+        status_code="1000",
+        status=ModuleStatus.FAULT,
+    )
+    assert (
+        _module_status_value(ModuleData(reading=live_fault, telemetry=telemetry))
+        == "fault"
     )
 
 
