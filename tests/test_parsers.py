@@ -85,6 +85,16 @@ def test_status_8000_is_low_light_not_transport_failure() -> None:
     assert reading.total_wh == 12345.0
 
 
+def test_status_0010_remains_frequency_over_fault() -> None:
+    reading = parse_module_json(
+        {"status": "0010"},
+        address="9",
+        raw_id="REDACTED_MODULE_A",
+    )
+    assert reading.status is ModuleStatus.FAULT
+    assert reading.status_code == "0010"
+
+
 def test_min_dat_parses_complete_whitespace_records_and_normalizes_units() -> None:
     records = parse_min_dat((FIXTURES / "min.dat").read_text())
     assert len(records) == 2
