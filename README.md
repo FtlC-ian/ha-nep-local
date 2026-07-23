@@ -20,6 +20,10 @@ Power, DC voltage, current, energy, and status remain per input channel. AC volt
 - Daily and lifetime energy are reported in watt-hours.
 - Daily energy is a resetting total; lifetime energy is a non-resetting total.
 - NEP status `8000` means low light. It is a valid response and does not make a device unavailable.
+- NEP status `0010` is the documented bit-4 "frequency over" fault. It can appear
+  briefly while an inverter synchronizes at sunrise, but remains a fault rather
+  than a standby state. The exact code is available as the status sensor's
+  `raw_status` attribute.
 - Missing or invalid telemetry is not converted to zero.
 - Rich `min.dat` telemetry older than 15 minutes is treated as unavailable.
 - Fresh `min.dat` daily energy backs up the live daily-energy value; lifetime energy remains live-endpoint only.
