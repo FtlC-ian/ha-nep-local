@@ -38,8 +38,8 @@ read-only backing JSON, `/module/module.php`, supplies the inputs. It scans nume
 overview so recovery is automatic. In `const.py`, `FALLBACK_ENABLED` enables this
 path; channel `SLOT_START=1`, `SLOT_END=15` (inclusive), and
 `MISSING_SLOT_LIMIT=3` bound discovery. Only absent files count toward that stop,
-and the scan always reaches the highest registered slot inside the configured
-range, even after gaps. Registered slots outside that range remain unknown.
+and the scan always reaches the highest registered slot, even after gaps.
+The end extends beyond SLOT_END when needed to include registered channels.
 Missing, malformed, stale, or silent channels are unavailable, not fabricated
 zeroes. The gateway's silent template has zero electrical readings and the
 -100 °C sentinel; a responding channel with valid voltage or temperature can
