@@ -22,12 +22,17 @@ async def async_get_config_entry_diagnostics(
                 "serial": data.inventory.serial,
                 "aggregate_available": data.aggregate is not None,
                 "module_count": len(data.inventory.modules),
+                "fallback": data.inventory.fallback,
+                "slot_mapping": "assumed_inverter_n_to_slot_n_minus_1"
+                if data.inventory.fallback
+                else "inventory",
             },
             "modules": [
                 {
                     "raw_id": module.raw_id,
                     "inverter_id": data.inventory.physical_inverter_id(module),
                     "address": module.address,
+                    "slot": module.slot,
                     "live_available": data.modules[module.raw_id].reading is not None,
                     "telemetry_available": data.modules[module.raw_id].telemetry
                     is not None,

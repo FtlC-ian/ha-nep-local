@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -38,10 +39,18 @@ class NepLocalConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             host = gateway_url(user_input[CONF_HOST])
-            try:
-                serial = await _validate_host(
-                    self.hass, host, user_input.get("serial", "")
+            manual_serial = user_input.get("serial", "").strip()
+            if manual_serial and (
+                not re.fullmatch(r"[0-9]{14}", manual_serial)
+                or not user_input.get("confirm_serial", False)
+            ):
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=self._user_schema(),
+                    errors={"base": "confirm_serial"},
                 )
+            try:
+                serial = await _validate_host(self.hass, host, manual_serial)
             except NepConnectionError:
                 errors["base"] = "cannot_connect"
             except (NepInvalidResponse, NepError):
@@ -54,10 +63,18 @@ class NepLocalConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {vol.Required(CONF_HOST): str, vol.Optional("serial"): str}
-            ),
+            data_schema=self._user_schema(),
             errors=errors,
+        )
+
+    @staticmethod
+    def _user_schema() -> vol.Schema:
+        return vol.Schema(
+            {
+                vol.Required(CONF_HOST): str,
+                vol.Optional("serial"): str,
+                vol.Optional("confirm_serial", default=False): bool,
+            }
         )
 
     async def async_step_reconfigure(

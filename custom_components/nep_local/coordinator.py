@@ -157,8 +157,8 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
                 raw_id
                 for raw_id in spellings
                 if any(
-                    f"{inventory.serial}_{raw_id}_{key}" in registered_ids
-                    for key in ("power", "today_energy", "lifetime_energy")
+                    entity_id.startswith(f"{inventory.serial}_{raw_id}_")
+                    for entity_id in registered_ids
                 )
             }
             if len(matches) > 1:
@@ -174,7 +174,9 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
         inventory = self._preserve_registered_ids(
             await self.client.fallback_inventory(self.config_entry.unique_id or "")
         )
-        records = await self.client.scan_slots()
+        records = await self.client.scan_slots(
+            {module.slot for module in inventory.modules if module.slot is not None}
+        )
         modules = {}
         for module in inventory.modules:
             telemetry = records.get(module.slot)

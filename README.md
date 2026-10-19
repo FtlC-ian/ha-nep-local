@@ -37,7 +37,9 @@ read-only backing JSON, `/module/module.php`, supplies the inputs. It scans nume
 `/data/<slot>/min.dat` files, not COM-ID paths. Every refresh retries the preferred
 overview so recovery is automatic. In `const.py`, `FALLBACK_ENABLED` enables this
 path; `SLOT_START=0`, `SLOT_END=15` (inclusive), and
-`MISSING_SLOT_LIMIT=3` bound discovery. Only absent files count toward that stop.
+`MISSING_SLOT_LIMIT=3` bound discovery. Only absent files count toward that stop,
+and the scan always reaches the highest registered slot inside the configured
+range, even after gaps. Registered slots outside that range remain unknown.
 Missing, malformed, or stale channels remain unknown, not zero. Gateway sums
 are unknown unless every registered channel has a fresh value. Unregistered
 slots are not assigned invented identities or included in totals.
@@ -45,8 +47,9 @@ slots are not assigned invented identities or included in totals.
 Existing configured entries reuse their gateway serial and registered COM-ID
 spelling, including both prefixed `0X326ED5E0` and unprefixed `326ED5E0` IDs.
 Entity unique-ID construction is unchanged. New installations can supply the
-optional serial number if the overview is dead; the registry does not attest
-that serial. Host reconfiguration still requires the preferred serial-bearing
+optional 14-digit serial number if the overview is dead, with explicit
+confirmation that it matches the gateway label and any existing HA entry;
+the registry does not attest that serial. Host reconfiguration still requires the preferred serial-bearing
 overview to prevent accidentally switching gateway identities.
 
 ### Observed columns (BDG-256(P3), 2026-10-19)

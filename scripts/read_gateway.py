@@ -12,8 +12,8 @@ async def main():
     async with ClientSession() as session:
         client = NepGatewayClient(session, sys.argv[1])
         inventory = await client.fallback_inventory(sys.argv[2])
-        records = await client.scan_slots()
-        print("slot COM-ID timestamp W Vdc Vac A Hz C today_Wh status flag diagnostic")
+        records = await client.scan_slots({module.slot for module in inventory.modules})
+        print("slot COM-ID timestamp W Vdc Vac A Hz C today_Wh status index diagnostic")
         for module in inventory.modules:
             record = records.get(module.slot)
             if record is None:

@@ -95,16 +95,22 @@ class NepGatewayClient:
             modules = parse_module_registry(await self._get_json("/module/module.php"))
         return GatewayInventory(serial, modules, fallback=True)
 
-    async def scan_slots(self) -> dict[int, MinDatRecord]:
+    async def scan_slots(
+        self, registered_slots: set[int] | None = None
+    ) -> dict[int, MinDatRecord]:
         """Bound discovery and stop only for consecutive absent files."""
         records = {}
         missing = 0
+        last_registered = max(
+            (slot for slot in registered_slots or () if SLOT_START <= slot <= SLOT_END),
+            default=SLOT_START - 1,
+        )
         for slot in range(SLOT_START, SLOT_END + 1):
             try:
                 record = await self.min_dat(InventoryModule(str(slot), "", slot=slot))
             except NepResponseMissing:
                 missing += 1
-                if missing >= MISSING_SLOT_LIMIT:
+                if missing >= MISSING_SLOT_LIMIT and slot >= last_registered:
                     break
             except NepInvalidResponse:
                 missing = 0
