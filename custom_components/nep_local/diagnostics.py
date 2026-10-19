@@ -23,9 +23,10 @@ async def async_get_config_entry_diagnostics(
                 "aggregate_available": data.aggregate is not None,
                 "module_count": len(data.inventory.modules),
                 "fallback": data.inventory.fallback,
-                "slot_mapping": "assumed_inverter_n_to_slot_n_minus_1"
+                "slot_mapping": "inverter_n_is_plc_slot_n"
                 if data.inventory.fallback
                 else "inventory",
+                "aggregate_check": data.aggregate_check,
             },
             "modules": [
                 {

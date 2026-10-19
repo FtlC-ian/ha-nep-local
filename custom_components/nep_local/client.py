@@ -101,11 +101,8 @@ class NepGatewayClient:
         """Bound discovery and stop only for consecutive absent files."""
         records = {}
         missing = 0
-        last_registered = max(
-            (slot for slot in registered_slots or () if SLOT_START <= slot <= SLOT_END),
-            default=SLOT_START - 1,
-        )
-        for slot in range(SLOT_START, SLOT_END + 1):
+        last_registered = max(registered_slots or (), default=SLOT_START - 1)
+        for slot in range(SLOT_START, max(SLOT_END, last_registered) + 1):
             try:
                 record = await self.min_dat(InventoryModule(str(slot), "", slot=slot))
             except NepResponseMissing:

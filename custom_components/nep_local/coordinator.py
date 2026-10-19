@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from homeassistant.config_entries import ConfigEntry
@@ -23,7 +23,13 @@ from .const import (
     TELEMETRY_MAX_AGE,
 )
 from .exceptions import NepError
-from .models import AggregateReading, GatewayInventory, MinDatRecord, ModuleReading
+from .models import (
+    AggregateReading,
+    GatewayInventory,
+    InventoryModule,
+    MinDatRecord,
+    ModuleReading,
+)
 from .parsers import parse_module_json
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,6 +50,7 @@ class GatewayData:
     inventory: GatewayInventory
     aggregate: AggregateReading | None
     modules: dict[str, ModuleData]
+    aggregate_check: dict[str, object] = field(default_factory=dict)
 
 
 class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
@@ -177,12 +184,24 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
         records = await self.client.scan_slots(
             {module.slot for module in inventory.modules if module.slot is not None}
         )
+        now = dt_util.now()
+        records = {
+            slot: record
+            for slot, record in records.items()
+            if self._telemetry_is_fresh(record, now)
+        }
+        try:
+            gateway_record = await self.client.min_dat(InventoryModule("0", "", slot=0))
+        except NepError:
+            gateway_record = None
+        if gateway_record is not None and not self._telemetry_is_fresh(
+            gateway_record, now
+        ):
+            gateway_record = None
         modules = {}
         for module in inventory.modules:
             telemetry = records.get(module.slot)
-            if telemetry is not None and not self._telemetry_is_fresh(
-                telemetry, dt_util.now()
-            ):
+            if telemetry is not None and not telemetry.has_measurements:
                 telemetry = None
             reading = None
             if telemetry is not None:
@@ -196,7 +215,9 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
                     raw_id=module.raw_id,
                 )
             modules[module.raw_id] = ModuleData(reading, telemetry)
-        if not any(data.reading is not None for data in modules.values()):
+        if gateway_record is None and not any(
+            data.reading is not None for data in modules.values()
+        ):
             raise UpdateFailed("No fresh registered slot measurements were readable")
         readings = [data.reading for data in modules.values()]
 
@@ -207,8 +228,51 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
             return sum(values) if all(value is not None for value in values) else None
 
         aggregate = AggregateReading(
-            power_w=complete_sum("power_w"),
-            today_wh=complete_sum("today_wh"),
+            power_w=gateway_record.power_w
+            if gateway_record
+            else complete_sum("power_w"),
+            today_wh=gateway_record.energy_wh
+            if gateway_record
+            else complete_sum("today_wh"),
             total_wh=complete_sum("total_wh"),
         )
-        return GatewayData(inventory, aggregate, modules)
+        channel_records = [records.get(module.slot) for module in inventory.modules]
+
+        def raw_sum(attribute: str) -> float | None:
+            if any(
+                record is None or getattr(record, attribute) is None
+                for record in channel_records
+            ):
+                return None
+            return sum(getattr(record, attribute) for record in channel_records)
+
+        power_sum = raw_sum("power_w")
+        today_sum = raw_sum("energy_wh")
+        check = {
+            "source": "min_dat_slot_0" if gateway_record else "complete_channel_sum",
+            "gateway_timestamp": gateway_record.timestamp.isoformat()
+            if gateway_record
+            else None,
+            "channel_timestamps": sorted(
+                {
+                    record.timestamp.isoformat()
+                    for record in channel_records
+                    if record is not None
+                }
+            ),
+            "fresh_channel_records": sum(
+                record is not None for record in channel_records
+            ),
+            "reporting_channels": sum(
+                data.reading is not None for data in modules.values()
+            ),
+            "channel_power_w": power_sum,
+            "channel_today_wh": today_sum,
+            "power_delta_w": gateway_record.power_w - power_sum
+            if gateway_record and power_sum is not None
+            else None,
+            "today_delta_wh": gateway_record.energy_wh - today_sum
+            if gateway_record and today_sum is not None
+            else None,
+        }
+        return GatewayData(inventory, aggregate, modules, check)

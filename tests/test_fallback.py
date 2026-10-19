@@ -2,6 +2,7 @@
 
 import json
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,6 +13,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.nep_local.client import NepGatewayClient
 from custom_components.nep_local.const import DOMAIN
 from custom_components.nep_local.coordinator import NepDataUpdateCoordinator
+from custom_components.nep_local.diagnostics import async_get_config_entry_diagnostics
 from custom_components.nep_local.exceptions import NepResponseMissing
 from custom_components.nep_local.models import AggregateReading, GatewayInventory
 from custom_components.nep_local.parsers import parse_min_dat, parse_module_registry
@@ -49,12 +51,93 @@ def test_fractional_telemetry_index_is_not_a_status_flag():
     assert record.diagnostic_code == "8B05"
 
 
+async def test_plc_slots_aggregate_and_silent_spares_end_to_end(hass):
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures/fallback_slots.json").read_text()
+    )
+    stamp = dt_util.now().strftime("%Y-%m-%d %H:%M")
+    registry_json = json.dumps(
+        {
+            "data": {
+                f"Inverter{index}": {"plcid": raw_id}
+                for index, raw_id in enumerate(fixture["com_ids"], start=1)
+            }
+        }
+    )
+    requests = []
+    stale_slots = set()
+
+    async def get_text(self, path, **kwargs):
+        requests.append(path)
+        if path == "/module/":
+            return "<html><div id='box'></div></html>"
+        if path == "/module/module.php":
+            return registry_json
+        if path.startswith("/data/"):
+            slot = path.split("/")[2]
+            if slot in fixture["slots"]:
+                timestamp = "2000-01-01 00:00" if slot in stale_slots else stamp
+                return timestamp + " " + fixture["slots"][slot].split(maxsplit=2)[2]
+        raise NepResponseMissing()
+
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="TESTGW", data={"host": "192.0.2.10"}, version=2
+    )
+    entry.add_to_hass(hass)
+    with patch.object(NepGatewayClient, "_get_text", get_text):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        coordinator = entry.runtime_data.coordinator
+        data = coordinator.data
+        assert [
+            (m.slot, m.raw_id)
+            for m in (data.inventory.modules[0], data.inventory.modules[-1])
+        ] == [(1, "0X326ED5E0"), (12, "0X326F2770")]
+        assert len(data.inventory.modules) == 12
+        assert "/data/12/min.dat" in requests
+        assert data.aggregate.power_w == pytest.approx(30.255)
+        assert data.aggregate.today_wh == 611
+        assert data.modules["0X326ED5E0"].reading.power_w == 0
+        assert data.modules["0X326ED5E1"].reading.power_w == pytest.approx(12.993)
+        entities = {
+            entity.unique_id: entity
+            for entity in er.async_entries_for_config_entry(
+                er.async_get(hass), entry.entry_id
+            )
+        }
+        for raw_id in (
+            "3268C170",
+            "3268C171",
+            "3265F760",
+            "3265F761",
+            "326F2771",
+            "326F2770",
+        ):
+            assert (
+                hass.states.get(entities[f"TESTGW_0X{raw_id}_power"].entity_id).state
+                == "unavailable"
+            )
+        diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+        check = diagnostics["gateway"]["aggregate_check"]
+        assert check["source"] == "min_dat_slot_0"
+        assert check["reporting_channels"] == 6
+        assert check["channel_power_w"] == pytest.approx(30.255)
+        assert check["channel_today_wh"] == 611
+        assert check["power_delta_w"] == pytest.approx(0)
+        assert check["today_delta_wh"] == 0
+        stale_slots.add("2")
+        await coordinator.async_refresh()
+        assert coordinator.data.aggregate.power_w == pytest.approx(30.255)
+        assert coordinator.data.aggregate_check["channel_power_w"] is None
+        assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 def test_registry_keeps_explicit_indices_and_inventory_identity_format():
     html = "<input id='plcid0' value='FFFF'><input id='plcid1' value='326ED5E0'><input id='plcid3' value='326EFF30'>"
     modules = parse_module_registry(html)
     assert [(m.slot, m.raw_id) for m in modules] == [
-        (0, "0X326ED5E0"),
-        (2, "0X326EFF30"),
+        (1, "0X326ED5E0"),
+        (3, "0X326EFF30"),
     ]
     assert modules == parse_module_registry(
         {
@@ -80,9 +163,9 @@ async def test_scan_stops_after_consecutive_missing_not_isolated_gap():
         ]
     )
     records = await client.scan_slots()
-    assert set(records) == {0, 2}
+    assert set(records) == {1, 3}
     assert [call.args[0].slot for call in client.min_dat.call_args_list] == list(
-        range(6)
+        range(1, 7)
     )
 
 
@@ -90,11 +173,11 @@ async def test_scan_does_not_hide_registered_slot_behind_missing_gap():
     client = NepGatewayClient(None, "http://example.invalid")
     record = parse_min_dat("2026-10-19 15:40 0 0 0 0 0 -100 0 1 0 8000")[-1]
     client.min_dat = AsyncMock(
-        side_effect=[NepResponseMissing()] * 7 + [record] + [NepResponseMissing()] * 3
+        side_effect=[NepResponseMissing()] * 6 + [record] + [NepResponseMissing()] * 3
     )
     records = await client.scan_slots({7})
     assert records[7] == record
-    assert client.min_dat.await_count == 11
+    assert client.min_dat.await_count == 10
 
 
 async def test_conflicting_registered_spellings_do_not_split_history(hass):
@@ -134,7 +217,8 @@ async def test_fallback_totals_freshness_and_preferred_path_recovery(hass):
     client.fallback_inventory.return_value = GatewayInventory(
         "TESTGW", modules, fallback=True
     )
-    client.scan_slots.return_value = {0: record, 1: record}
+    client.scan_slots.return_value = {1: record, 2: record}
+    client.min_dat.side_effect = NepResponseMissing()
     entry = MockConfigEntry(domain=DOMAIN, unique_id="TESTGW", data={})
     entry.add_to_hass(hass)
     coordinator = NepDataUpdateCoordinator(hass, entry, client)
@@ -147,7 +231,7 @@ async def test_fallback_totals_freshness_and_preferred_path_recovery(hass):
     stale = parse_min_dat(
         f"{stamp - timedelta(hours=1):%Y-%m-%d %H:%M} 0 0 0 0 0 -100 0 1 0 8000"
     )[-1]
-    client.scan_slots.return_value = {0: record, 1: stale}
+    client.scan_slots.return_value = {1: record, 2: stale}
     await coordinator.async_refresh()
     assert coordinator.data.aggregate.power_w is None
     assert coordinator.data.modules[modules[1].raw_id].reading is None
@@ -174,7 +258,7 @@ async def test_fallback_restores_registered_entity_history_ids(hass, com_id, see
             return "<html><div id='box'></div></html>"
         if path == "/module/module.php":
             return json.dumps({"data": {"Inverter1": {"plcid": "326ED5E0"}}})
-        if path == "/data/0/min.dat":
+        if path == "/data/1/min.dat":
             return telemetry
         raise NepResponseMissing()
 

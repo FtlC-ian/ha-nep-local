@@ -36,13 +36,21 @@ When the overview endpoint fails, the integration reads the COM-ID registry at
 read-only backing JSON, `/module/module.php`, supplies the inputs. It scans numeric
 `/data/<slot>/min.dat` files, not COM-ID paths. Every refresh retries the preferred
 overview so recovery is automatic. In `const.py`, `FALLBACK_ENABLED` enables this
-path; `SLOT_START=0`, `SLOT_END=15` (inclusive), and
+path; channel `SLOT_START=1`, `SLOT_END=15` (inclusive), and
 `MISSING_SLOT_LIMIT=3` bound discovery. Only absent files count toward that stop,
 and the scan always reaches the highest registered slot inside the configured
 range, even after gaps. Registered slots outside that range remain unknown.
-Missing, malformed, or stale channels remain unknown, not zero. Gateway sums
-are unknown unless every registered channel has a fresh value. Unregistered
-slots are not assigned invented identities or included in totals.
+Missing, malformed, stale, or silent channels are unavailable, not fabricated
+zeroes. The gateway's silent template has zero electrical readings and the
+-100 °C sentinel; a responding channel with valid voltage or temperature can
+still legitimately report 0 W. Slot 0 is fetched separately as the gateway
+aggregate and supplies power/today energy whenever fresh. If unavailable, the
+gateway uses a complete sum of reporting channels, otherwise unknown.
+Diagnostics cross-check slot 0 against all fresh raw channel records (including
+silent-slot zero templates), with sums, deltas, and reporting-channel count.
+Reads are not atomic; independently updated records can differ even within
+the same minute. Diagnostic timestamps accompany the cross-check values.
+Unregistered slots are never assigned invented identities or included in sums.
 
 Existing configured entries reuse their gateway serial and registered COM-ID
 spelling, including both prefixed `0X326ED5E0` and unprefixed `326ED5E0` IDs.
@@ -70,23 +78,32 @@ night:  2026-10-19 01:13 0 0 0 0 0 -100 0 1 0 8000
 ```
 
 The final word, not the diagnostic `8B05`, is used as the status, consistent
-with the existing parser and the known `8000` night/idle samples. A producing
-channel can still report `8000`, so that code never suppresses power or valid
+with the existing parser and the known `8000` night/idle samples. The producing
+gateway aggregate can report `8000`, so that code never suppresses power or valid
 nonzero voltage/frequency readings. Zero voltage/frequency at low light and
 the temperature sentinel are missing readings. The exact meanings of the
 penultimate diagnostic and numeric index remain unverified.
 
-### Slot identity assumption, requiring owner confirmation
+### Verified PLC slot identity
 
-The registry explicitly labels Inverter1 through Inverter12, but the telemetry
-files contain no COM-ID. We assume Inverter(N) maps to slot(N-1); ordering is
-not independently proven. Do not rearrange the registry without validating it.
+Registry Inverter(N) is PLC index/data slot N. Slot 0 is the gateway aggregate,
+not an inverter. The owner's PLC_ID dump confirms index 0 = FFFFFFFF (all),
+followed by the same twelve COM-IDs in the registry. Live HTTP evidence at
+2026-10-19 16:24 independently confirms it: slot 0 power 30.255 W equals
+slots 2 + 4 + 9 (12.993 + 2.026 + 15.236 W), and slot 0 daily energy 611 Wh
+equals all channels (1 + 112 + 0 + 42 + 444 + 12 Wh). Slots 1..12 respond;
+slot 13 is missing. Matching AC frequency and temperature pair slots (1,2),
+(3,4), and (9,10), consistent with their dual-input physical COM-ID pairs.
 
 ```text
-0 326ED5E0    1 326ED5E1    2 326EFF30    3 326EFF31
-4 3268C170    5 3268C171    6 3265F760    7 3265F761
-8 326F0891    9 326F0890   10 326F2771   11 326F2770
+0 GATEWAY
+1 326ED5E0    2 326ED5E1    3 326EFF30    4 326EFF31
+5 3268C170    6 3268C171    7 3265F760    8 3265F761
+9 326F0891   10 326F0890   11 326F2771   12 326F2770
 ```
+
+The owner confirmed slots 5..8 and 11..12 are unwired spares. Their silent
+templates remain unavailable, not 0 W sensors.
 
 Lifetime energy cannot be recovered from daily-resetting `min.dat` alone.
 Fallback deliberately reports lifetime as unknown rather than publishing

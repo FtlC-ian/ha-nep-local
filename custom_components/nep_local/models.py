@@ -88,3 +88,16 @@ class MinDatRecord:
     rssi: float | None
     diagnostic_code: str
     status_code: str
+
+    @property
+    def has_measurements(self) -> bool:
+        """Distinguish actual telemetry from the gateway's silent-slot template."""
+        return any(
+            value is not None
+            for value in (
+                self.voltage_dc_v,
+                self.voltage_ac_v,
+                self.frequency_hz,
+                self.temperature_c,
+            )
+        ) or any(value not in (None, 0) for value in (self.power_w, self.current_a))

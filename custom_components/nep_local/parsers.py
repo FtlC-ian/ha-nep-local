@@ -140,7 +140,7 @@ class _RegistryParser(HTMLParser):
 def parse_module_registry(payload: str | dict) -> tuple[InventoryModule, ...]:
     """Parse registry HTML or the JSON backing its JavaScript-rendered inputs.
 
-    Inverter N -> slot N-1 is an unverified firmware ordering assumption.
+    Inverter N is PLC index / data slot N; slot zero is the gateway aggregate.
     """
     if isinstance(payload, str):
         parser = _RegistryParser()
@@ -167,7 +167,7 @@ def parse_module_registry(payload: str | dict) -> tuple[InventoryModule, ...]:
         if raw_id in seen:
             raise NepInvalidResponse("registry contains duplicate COM-IDs")
         seen.add(raw_id)
-        modules.append(InventoryModule(str(index), raw_id, slot=index - 1))
+        modules.append(InventoryModule(str(index), raw_id, slot=index))
     if not modules:
         raise NepInvalidResponse("no registered modules found")
     return tuple(modules)
