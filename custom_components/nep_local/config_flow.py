@@ -5,20 +5,24 @@ from __future__ import annotations
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import gateway_url
 from .client import NepGatewayClient
-from .const import CONF_HOST, DOMAIN
+from .const import CONF_HOST, DOMAIN, FALLBACK_ENABLED
 from .exceptions import NepConnectionError, NepError, NepInvalidResponse
 
 
-async def _validate_host(hass: HomeAssistant, host: str) -> str:
+async def _validate_host(hass: HomeAssistant, host: str, serial: str = "") -> str:
     client = NepGatewayClient(async_get_clientsession(hass), gateway_url(host))
-    inventory = await client.inventory()
+    try:
+        inventory = await client.inventory()
+    except NepError:
+        if not FALLBACK_ENABLED or not serial:
+            raise
+        inventory = await client.fallback_inventory(serial)
     return inventory.serial
 
 
@@ -35,7 +39,9 @@ class NepLocalConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = gateway_url(user_input[CONF_HOST])
             try:
-                serial = await _validate_host(self.hass, host)
+                serial = await _validate_host(
+                    self.hass, host, user_input.get("serial", "")
+                )
             except NepConnectionError:
                 errors["base"] = "cannot_connect"
             except (NepInvalidResponse, NepError):
@@ -48,7 +54,9 @@ class NepLocalConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({vol.Required(CONF_HOST): str}),
+            data_schema=vol.Schema(
+                {vol.Required(CONF_HOST): str, vol.Optional("serial"): str}
+            ),
             errors=errors,
         )
 

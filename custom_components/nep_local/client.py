@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
-from .const import MAX_CONCURRENT_REQUESTS
+from .const import MAX_CONCURRENT_REQUESTS, MISSING_SLOT_LIMIT, SLOT_END, SLOT_START
 from .exceptions import NepConnectionError, NepInvalidResponse, NepResponseMissing
 from .models import (
     AggregateReading,
@@ -23,6 +23,7 @@ from .parsers import (
     parse_inventory_page,
     parse_min_dat,
     parse_module_json,
+    parse_module_registry,
 )
 
 INVENTORY_PATH = "/nep/status/index/"
@@ -48,15 +49,17 @@ class NepGatewayClient:
         self, path: str, *, headers: dict[str, str] | None = None
     ) -> str:
         try:
-            async with self._request_semaphore:
-                async with self._session.get(
+            async with (
+                self._request_semaphore,
+                self._session.get(
                     self._url(path), headers=headers, timeout=REQUEST_TIMEOUT
-                ) as response:
-                    if response.status in (204, 404):
-                        raise NepResponseMissing(f"{path}: HTTP {response.status}")
-                    if response.status >= 400:
-                        raise NepInvalidResponse(f"{path}: HTTP {response.status}")
-                    text = await response.text()
+                ) as response,
+            ):
+                if response.status in (204, 404):
+                    raise NepResponseMissing(f"{path}: HTTP {response.status}")
+                if response.status >= 400:
+                    raise NepInvalidResponse(f"{path}: HTTP {response.status}")
+                text = await response.text()
         except (TimeoutError, ClientError) as error:
             raise NepConnectionError(f"cannot connect to {self._base_url}") from error
         if not text.strip():
@@ -81,6 +84,35 @@ class NepGatewayClient:
         path = STATUS_PATH.format(address="0", cachebuster=self._cachebuster())
         return parse_aggregate_json(await self._get_json(path))
 
+    async def fallback_inventory(self, serial: str) -> GatewayInventory:
+        """Read registry identities, retaining the configured gateway serial."""
+        if not serial:
+            raise NepInvalidResponse("fallback requires the gateway serial number")
+        html = await self._get_text("/module/")
+        try:
+            modules = parse_module_registry(html)
+        except NepInvalidResponse:
+            modules = parse_module_registry(await self._get_json("/module/module.php"))
+        return GatewayInventory(serial, modules, fallback=True)
+
+    async def scan_slots(self) -> dict[int, MinDatRecord]:
+        """Bound discovery and stop only for consecutive absent files."""
+        records = {}
+        missing = 0
+        for slot in range(SLOT_START, SLOT_END + 1):
+            try:
+                record = await self.min_dat(InventoryModule(str(slot), "", slot=slot))
+            except NepResponseMissing:
+                missing += 1
+                if missing >= MISSING_SLOT_LIMIT:
+                    break
+            except NepInvalidResponse:
+                missing = 0
+            else:
+                missing = 0
+                records[slot] = record
+        return records
+
     async def module(self, module: InventoryModule) -> ModuleReading:
         path = STATUS_PATH.format(
             address=quote(module.address, safe=""), cachebuster=self._cachebuster()
@@ -91,7 +123,8 @@ class NepGatewayClient:
 
     async def min_dat(self, module: InventoryModule) -> MinDatRecord:
         """Return the newest complete rich record from a bounded file tail."""
-        path = MIN_DAT_PATH.format(address=quote(module.address, safe=""))
+        address = str(module.slot) if module.slot is not None else module.address
+        path = MIN_DAT_PATH.format(address=quote(address, safe=""))
         records = parse_min_dat(
             await self._get_text(path, headers={"Range": "bytes=-1024"})
         )

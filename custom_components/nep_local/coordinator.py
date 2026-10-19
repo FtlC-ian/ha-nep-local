@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable
-from dataclasses import dataclass
-from datetime import datetime
 import logging
+from collections.abc import Awaitable
+from dataclasses import dataclass, replace
+from datetime import datetime
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -17,11 +18,13 @@ from .client import NepGatewayClient
 from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    FALLBACK_ENABLED,
     TELEMETRY_FUTURE_TOLERANCE,
     TELEMETRY_MAX_AGE,
 )
 from .exceptions import NepError
 from .models import AggregateReading, GatewayInventory, MinDatRecord, ModuleReading
+from .parsers import parse_module_json
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,9 +82,18 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
 
     async def _async_update_data(self) -> GatewayData:
         try:
-            inventory = await self.client.inventory()
+            inventory = self._preserve_registered_ids(await self.client.inventory())
         except NepError as error:
-            raise UpdateFailed(f"Unable to read gateway inventory: {error}") from error
+            if not FALLBACK_ENABLED:
+                raise UpdateFailed(
+                    f"Unable to read gateway inventory: {error}"
+                ) from error
+            try:
+                return await self._async_fallback_data()
+            except NepError as fallback_error:
+                raise UpdateFailed(
+                    f"Unable to read slot telemetry: {fallback_error}"
+                ) from fallback_error
 
         tasks: list[Awaitable[object]] = [self.client.aggregate()]
         for module in inventory.modules:
@@ -128,3 +140,73 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
                 "Gateway inventory responded, but no measurements were readable"
             )
         return GatewayData(inventory=inventory, aggregate=aggregate, modules=modules)
+
+    def _preserve_registered_ids(self, inventory: GatewayInventory) -> GatewayInventory:
+        registry = er.async_get(self.hass)
+        registered_ids = {
+            entity.unique_id
+            for entity in er.async_entries_for_config_entry(
+                registry, self.config_entry.entry_id
+            )
+            if entity.platform == DOMAIN
+        }
+        modules_by_identity = []
+        for module in inventory.modules:
+            spellings = (module.raw_id, module.raw_id.removeprefix("0X"))
+            matches = {
+                raw_id
+                for raw_id in spellings
+                if any(
+                    f"{inventory.serial}_{raw_id}_{key}" in registered_ids
+                    for key in ("power", "today_energy", "lifetime_energy")
+                )
+            }
+            if len(matches) > 1:
+                raise UpdateFailed(
+                    "Conflicting registered COM-ID spellings; refusing to split history"
+                )
+            modules_by_identity.append(
+                replace(module, raw_id=next(iter(matches), module.raw_id))
+            )
+        return replace(inventory, modules=tuple(modules_by_identity))
+
+    async def _async_fallback_data(self) -> GatewayData:
+        inventory = self._preserve_registered_ids(
+            await self.client.fallback_inventory(self.config_entry.unique_id or "")
+        )
+        records = await self.client.scan_slots()
+        modules = {}
+        for module in inventory.modules:
+            telemetry = records.get(module.slot)
+            if telemetry is not None and not self._telemetry_is_fresh(
+                telemetry, dt_util.now()
+            ):
+                telemetry = None
+            reading = None
+            if telemetry is not None:
+                reading = parse_module_json(
+                    {
+                        "now": telemetry.power_w,
+                        "today": telemetry.energy_wh,
+                        "status": telemetry.status_code,
+                    },
+                    address=module.address,
+                    raw_id=module.raw_id,
+                )
+            modules[module.raw_id] = ModuleData(reading, telemetry)
+        if not any(data.reading is not None for data in modules.values()):
+            raise UpdateFailed("No fresh registered slot measurements were readable")
+        readings = [data.reading for data in modules.values()]
+
+        def complete_sum(attribute: str) -> float | None:
+            values = [
+                getattr(reading, attribute) if reading else None for reading in readings
+            ]
+            return sum(values) if all(value is not None for value in values) else None
+
+        aggregate = AggregateReading(
+            power_w=complete_sum("power_w"),
+            today_wh=complete_sum("today_wh"),
+            total_wh=complete_sum("total_wh"),
+        )
+        return GatewayData(inventory, aggregate, modules)

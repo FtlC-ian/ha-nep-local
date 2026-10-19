@@ -23,6 +23,7 @@ class InventoryModule:
 
     address: str
     raw_id: str
+    slot: int | None = None
 
     @property
     def inverter_id(self) -> str:
@@ -40,6 +41,7 @@ class GatewayInventory:
 
     serial: str
     modules: tuple[InventoryModule, ...]
+    fallback: bool = False
 
     def physical_inverter_id(self, module: InventoryModule) -> str:
         """Return an inventory-independent physical inverter identifier."""

@@ -55,9 +55,7 @@ class NepInverterSensorDescription(SensorEntityDescription):
     value_fn: Callable[[tuple[MinDatRecord, ...]], Any]
 
 
-def _first_telemetry_value(
-    records: tuple[MinDatRecord, ...], attribute: str
-) -> Any:
+def _first_telemetry_value(records: tuple[MinDatRecord, ...], attribute: str) -> Any:
     """Return the first reported value for a shared inverter measurement."""
     return next(
         (
@@ -135,7 +133,9 @@ MODULE_SENSORS = (
         value_fn=lambda data: (
             data.reading.today_wh
             if data.reading and data.reading.today_wh is not None
-            else data.telemetry.energy_wh if data.telemetry else None
+            else data.telemetry.energy_wh
+            if data.telemetry
+            else None
         ),
     ),
     NepModuleSensorDescription(

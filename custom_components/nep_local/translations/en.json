@@ -15,7 +15,7 @@
         "description": "Update the address of this NEP gateway"
       },
       "user": {
-        "data": {"host": "Host"},
+        "data": {"host": "Host", "serial": "Gateway serial (optional, required if overview is unavailable)"},
         "description": "Enter the local IP address or hostname of the NEP gateway"
       }
     }
