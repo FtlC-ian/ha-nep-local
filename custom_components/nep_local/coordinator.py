@@ -34,6 +34,17 @@ from .parsers import parse_module_json
 
 _LOGGER = logging.getLogger(__name__)
 
+_CHANNEL_HISTORY_SENSOR_KEYS = (
+    "power",
+    "today_energy",
+    "lifetime_energy",
+    "dc_voltage",
+    "current",
+    "status",
+    "rssi",
+    "diagnostic_code",
+)
+
 
 @dataclass(frozen=True)
 class ModuleData:
@@ -155,7 +166,7 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
             for entity in er.async_entries_for_config_entry(
                 registry, self.config_entry.entry_id
             )
-            if entity.platform == DOMAIN
+            if entity.platform == DOMAIN and entity.domain == "sensor"
         }
         modules_by_identity = []
         for module in inventory.modules:
@@ -164,8 +175,8 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
                 raw_id
                 for raw_id in spellings
                 if any(
-                    entity_id.startswith(f"{inventory.serial}_{raw_id}_")
-                    for entity_id in registered_ids
+                    f"{inventory.serial}_{raw_id}_{key}" in registered_ids
+                    for key in _CHANNEL_HISTORY_SENSOR_KEYS
                 )
             }
             if len(matches) > 1:

@@ -180,7 +180,8 @@ async def test_scan_does_not_hide_registered_slot_behind_missing_gap():
     assert client.min_dat.await_count == 10
 
 
-async def test_conflicting_registered_spellings_do_not_split_history(hass):
+@pytest.mark.parametrize("fallback", [False, True])
+async def test_conflicting_registered_spellings_do_not_split_history(hass, fallback):
     entry = MockConfigEntry(domain=DOMAIN, unique_id="TESTGW", data={})
     entry.add_to_hass(hass)
     registry = er.async_get(hass)
@@ -192,6 +193,9 @@ async def test_conflicting_registered_spellings_do_not_split_history(hass):
     client.inventory.return_value = GatewayInventory(
         "TESTGW", parse_module_registry("<input id='plcid1' value='12340000'>")
     )
+    if fallback:
+        client.fallback_inventory.return_value = client.inventory.return_value
+        client.inventory.side_effect = NepResponseMissing()
     coordinator = NepDataUpdateCoordinator(hass, entry, client)
     await coordinator.async_refresh()
     assert not coordinator.last_update_success
@@ -299,5 +303,19 @@ async def test_fallback_restores_registered_entity_history_ids(hass, com_id, see
         assert (
             hass.states.get(entities[f"TESTGW_{com_id}_status"].entity_id).state
             == "low_light"
+        )
+        assert "TESTGW_0X12340000_ac_voltage" in entities
+        coordinator = entry.runtime_data.coordinator
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        assert coordinator.last_update_success
+        assert coordinator.data.inventory.modules[0].raw_id == com_id
+        assert set(coordinator.data.modules) == {com_id}
+        assert float(
+            hass.states.get(entities[f"TESTGW_{com_id}_power"].entity_id).state
+        ) == pytest.approx(165.054)
+        assert (
+            registry.async_get(retained.entity_id).unique_id
+            == f"TESTGW_{com_id}_{seed_key}"
         )
         assert await hass.config_entries.async_unload(entry.entry_id)
