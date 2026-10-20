@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+import math
 import re
 from datetime import datetime
 from html.parser import HTMLParser
-import logging
-import math
 from typing import Any
 
 from .exceptions import NepInvalidResponse
@@ -122,6 +122,57 @@ def parse_inventory_page(payload: str) -> GatewayInventory:
     return GatewayInventory(serial=serial_match.group(1), modules=modules)
 
 
+class _RegistryParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entries: dict[int, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "input":
+            return
+        values = dict(attrs)
+        name = values.get("id") or values.get("name") or ""
+        match = re.fullmatch(r"(?:inverter|plcid)([0-9]+)", name, re.IGNORECASE)
+        if match:
+            self.entries[int(match[1])] = values.get("value") or ""
+
+
+def parse_module_registry(payload: str | dict) -> tuple[InventoryModule, ...]:
+    """Parse registry HTML or the JSON backing its JavaScript-rendered inputs.
+
+    Inverter N is PLC index / data slot N; slot zero is the gateway aggregate.
+    """
+    if isinstance(payload, str):
+        parser = _RegistryParser()
+        parser.feed(payload)
+        entries = parser.entries
+    else:
+        data = _object(payload, "registry").get("data", {})
+        if not isinstance(data, dict):
+            raise NepInvalidResponse("registry data must be an object")
+        entries = {}
+        for name, value in data.items():
+            match = re.fullmatch(r"Inverter([0-9]+)", name, re.IGNORECASE)
+            if match and isinstance(value, dict):
+                entries[int(match[1])] = value.get("plcid", "")
+    modules = []
+    seen: set[str] = set()
+    for index, value in sorted(entries.items()):
+        if index == 0 or not value:
+            continue
+        raw_id = str(value).upper().removeprefix("0X")
+        if not re.fullmatch(r"[0-9A-F]{1,8}", raw_id):
+            raise NepInvalidResponse("registry contains an invalid COM-ID")
+        raw_id = f"0X{raw_id.zfill(8)}"
+        if raw_id in seen:
+            raise NepInvalidResponse("registry contains duplicate COM-IDs")
+        seen.add(raw_id)
+        modules.append(InventoryModule(str(index), raw_id, slot=index))
+    if not modules:
+        raise NepInvalidResponse("no registered modules found")
+    return tuple(modules)
+
+
 def _object(payload: Any, endpoint: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise NepInvalidResponse(f"{endpoint} response must be a JSON object")
@@ -181,20 +232,21 @@ def parse_min_dat(payload: str) -> list[MinDatRecord]:
             status_code = _status(fields[11], "min.dat status") or ""
             low_light = status_code == "8000"
             temperature = _finite(fields[7], "min.dat temperature")
+            voltage_dc = _finite(fields[3], "min.dat DC voltage")
+            voltage_ac = _finite(fields[4], "min.dat AC voltage")
+            frequency = _finite(fields[6], "min.dat frequency")
             records.append(
                 MinDatRecord(
                     timestamp=timestamp,
                     power_w=_finite(fields[2], "min.dat power") * 1000,
                     voltage_dc_v=(
-                        None if low_light else _finite(fields[3], "min.dat DC voltage")
+                        None if low_light and voltage_dc == 0 else voltage_dc
                     ),
                     voltage_ac_v=(
-                        None if low_light else _finite(fields[4], "min.dat AC voltage")
+                        None if low_light and voltage_ac == 0 else voltage_ac
                     ),
                     current_a=_finite(fields[5], "min.dat current"),
-                    frequency_hz=(
-                        None if low_light else _finite(fields[6], "min.dat frequency")
-                    ),
+                    frequency_hz=(None if low_light and frequency == 0 else frequency),
                     temperature_c=None if temperature <= -50 else temperature,
                     energy_wh=_finite(fields[8], "min.dat energy") * 1000,
                     rssi=_finite(fields[9], "min.dat RSSI"),

@@ -23,6 +23,7 @@ class InventoryModule:
 
     address: str
     raw_id: str
+    slot: int | None = None
 
     @property
     def inverter_id(self) -> str:
@@ -40,6 +41,7 @@ class GatewayInventory:
 
     serial: str
     modules: tuple[InventoryModule, ...]
+    fallback: bool = False
 
     def physical_inverter_id(self, module: InventoryModule) -> str:
         """Return an inventory-independent physical inverter identifier."""
@@ -86,3 +88,16 @@ class MinDatRecord:
     rssi: float | None
     diagnostic_code: str
     status_code: str
+
+    @property
+    def has_measurements(self) -> bool:
+        """Distinguish actual telemetry from the gateway's silent-slot template."""
+        return any(
+            value is not None
+            for value in (
+                self.voltage_dc_v,
+                self.voltage_ac_v,
+                self.frequency_hz,
+                self.temperature_c,
+            )
+        ) or any(value not in (None, 0) for value in (self.power_w, self.current_a))

@@ -10,3 +10,7 @@ TELEMETRY_FUTURE_TOLERANCE = timedelta(minutes=5)
 TELEMETRY_MAX_AGE = timedelta(minutes=15)
 MANUFACTURER = "Northern Electric Power"
 MODEL = "BDG-256 Gateway"
+FALLBACK_ENABLED = True
+SLOT_START = 1
+SLOT_END = 15
+MISSING_SLOT_LIMIT = 3

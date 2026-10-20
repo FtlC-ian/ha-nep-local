@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable
-from dataclasses import dataclass
-from datetime import datetime
 import logging
+from collections.abc import Awaitable
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -17,13 +18,32 @@ from .client import NepGatewayClient
 from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    FALLBACK_ENABLED,
     TELEMETRY_FUTURE_TOLERANCE,
     TELEMETRY_MAX_AGE,
 )
 from .exceptions import NepError
-from .models import AggregateReading, GatewayInventory, MinDatRecord, ModuleReading
+from .models import (
+    AggregateReading,
+    GatewayInventory,
+    InventoryModule,
+    MinDatRecord,
+    ModuleReading,
+)
+from .parsers import parse_module_json
 
 _LOGGER = logging.getLogger(__name__)
+
+_CHANNEL_HISTORY_SENSOR_KEYS = (
+    "power",
+    "today_energy",
+    "lifetime_energy",
+    "dc_voltage",
+    "current",
+    "status",
+    "rssi",
+    "diagnostic_code",
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +61,7 @@ class GatewayData:
     inventory: GatewayInventory
     aggregate: AggregateReading | None
     modules: dict[str, ModuleData]
+    aggregate_check: dict[str, object] = field(default_factory=dict)
 
 
 class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
@@ -79,9 +100,18 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
 
     async def _async_update_data(self) -> GatewayData:
         try:
-            inventory = await self.client.inventory()
+            inventory = self._preserve_registered_ids(await self.client.inventory())
         except NepError as error:
-            raise UpdateFailed(f"Unable to read gateway inventory: {error}") from error
+            if not FALLBACK_ENABLED:
+                raise UpdateFailed(
+                    f"Unable to read gateway inventory: {error}"
+                ) from error
+            try:
+                return await self._async_fallback_data()
+            except NepError as fallback_error:
+                raise UpdateFailed(
+                    f"Unable to read slot telemetry: {fallback_error}"
+                ) from fallback_error
 
         tasks: list[Awaitable[object]] = [self.client.aggregate()]
         for module in inventory.modules:
@@ -128,3 +158,132 @@ class NepDataUpdateCoordinator(DataUpdateCoordinator[GatewayData]):
                 "Gateway inventory responded, but no measurements were readable"
             )
         return GatewayData(inventory=inventory, aggregate=aggregate, modules=modules)
+
+    def _preserve_registered_ids(self, inventory: GatewayInventory) -> GatewayInventory:
+        registry = er.async_get(self.hass)
+        registered_ids = {
+            entity.unique_id
+            for entity in er.async_entries_for_config_entry(
+                registry, self.config_entry.entry_id
+            )
+            if entity.platform == DOMAIN and entity.domain == "sensor"
+        }
+        modules_by_identity = []
+        for module in inventory.modules:
+            spellings = (module.raw_id, module.raw_id.removeprefix("0X"))
+            matches = {
+                raw_id
+                for raw_id in spellings
+                if any(
+                    f"{inventory.serial}_{raw_id}_{key}" in registered_ids
+                    for key in _CHANNEL_HISTORY_SENSOR_KEYS
+                )
+            }
+            if len(matches) > 1:
+                raise UpdateFailed(
+                    "Conflicting registered COM-ID spellings; refusing to split history"
+                )
+            modules_by_identity.append(
+                replace(module, raw_id=next(iter(matches), module.raw_id))
+            )
+        return replace(inventory, modules=tuple(modules_by_identity))
+
+    async def _async_fallback_data(self) -> GatewayData:
+        inventory = self._preserve_registered_ids(
+            await self.client.fallback_inventory(self.config_entry.unique_id or "")
+        )
+        records = await self.client.scan_slots(
+            {module.slot for module in inventory.modules if module.slot is not None}
+        )
+        now = dt_util.now()
+        records = {
+            slot: record
+            for slot, record in records.items()
+            if self._telemetry_is_fresh(record, now)
+        }
+        try:
+            gateway_record = await self.client.min_dat(InventoryModule("0", "", slot=0))
+        except NepError:
+            gateway_record = None
+        if gateway_record is not None and not self._telemetry_is_fresh(
+            gateway_record, now
+        ):
+            gateway_record = None
+        modules = {}
+        for module in inventory.modules:
+            telemetry = records.get(module.slot)
+            if telemetry is not None and not telemetry.has_measurements:
+                telemetry = None
+            reading = None
+            if telemetry is not None:
+                reading = parse_module_json(
+                    {
+                        "now": telemetry.power_w,
+                        "today": telemetry.energy_wh,
+                        "status": telemetry.status_code,
+                    },
+                    address=module.address,
+                    raw_id=module.raw_id,
+                )
+            modules[module.raw_id] = ModuleData(reading, telemetry)
+        if gateway_record is None and not any(
+            data.reading is not None for data in modules.values()
+        ):
+            raise UpdateFailed("No fresh registered slot measurements were readable")
+        readings = [data.reading for data in modules.values()]
+
+        def complete_sum(attribute: str) -> float | None:
+            values = [
+                getattr(reading, attribute) if reading else None for reading in readings
+            ]
+            return sum(values) if all(value is not None for value in values) else None
+
+        aggregate = AggregateReading(
+            power_w=gateway_record.power_w
+            if gateway_record
+            else complete_sum("power_w"),
+            today_wh=gateway_record.energy_wh
+            if gateway_record
+            else complete_sum("today_wh"),
+            total_wh=complete_sum("total_wh"),
+        )
+        channel_records = [records.get(module.slot) for module in inventory.modules]
+
+        def raw_sum(attribute: str) -> float | None:
+            if any(
+                record is None or getattr(record, attribute) is None
+                for record in channel_records
+            ):
+                return None
+            return sum(getattr(record, attribute) for record in channel_records)
+
+        power_sum = raw_sum("power_w")
+        today_sum = raw_sum("energy_wh")
+        check = {
+            "source": "min_dat_slot_0" if gateway_record else "complete_channel_sum",
+            "gateway_timestamp": gateway_record.timestamp.isoformat()
+            if gateway_record
+            else None,
+            "channel_timestamps": sorted(
+                {
+                    record.timestamp.isoformat()
+                    for record in channel_records
+                    if record is not None
+                }
+            ),
+            "fresh_channel_records": sum(
+                record is not None for record in channel_records
+            ),
+            "reporting_channels": sum(
+                data.reading is not None for data in modules.values()
+            ),
+            "channel_power_w": power_sum,
+            "channel_today_wh": today_sum,
+            "power_delta_w": gateway_record.power_w - power_sum
+            if gateway_record and power_sum is not None
+            else None,
+            "today_delta_wh": gateway_record.energy_wh - today_sum
+            if gateway_record and today_sum is not None
+            else None,
+        }
+        return GatewayData(inventory, aggregate, modules, check)

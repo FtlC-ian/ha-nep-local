@@ -2,23 +2,28 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import gateway_url
 from .client import NepGatewayClient
-from .const import CONF_HOST, DOMAIN
+from .const import CONF_HOST, DOMAIN, FALLBACK_ENABLED
 from .exceptions import NepConnectionError, NepError, NepInvalidResponse
 
 
-async def _validate_host(hass: HomeAssistant, host: str) -> str:
+async def _validate_host(hass: HomeAssistant, host: str, serial: str = "") -> str:
     client = NepGatewayClient(async_get_clientsession(hass), gateway_url(host))
-    inventory = await client.inventory()
+    try:
+        inventory = await client.inventory()
+    except NepError:
+        if not FALLBACK_ENABLED or not serial:
+            raise
+        inventory = await client.fallback_inventory(serial)
     return inventory.serial
 
 
@@ -34,8 +39,18 @@ class NepLocalConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             host = gateway_url(user_input[CONF_HOST])
+            manual_serial = user_input.get("serial", "").strip()
+            if manual_serial and (
+                not re.fullmatch(r"[0-9]{14}", manual_serial)
+                or not user_input.get("confirm_serial", False)
+            ):
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=self._user_schema(),
+                    errors={"base": "confirm_serial"},
+                )
             try:
-                serial = await _validate_host(self.hass, host)
+                serial = await _validate_host(self.hass, host, manual_serial)
             except NepConnectionError:
                 errors["base"] = "cannot_connect"
             except (NepInvalidResponse, NepError):
@@ -48,8 +63,18 @@ class NepLocalConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({vol.Required(CONF_HOST): str}),
+            data_schema=self._user_schema(),
             errors=errors,
+        )
+
+    @staticmethod
+    def _user_schema() -> vol.Schema:
+        return vol.Schema(
+            {
+                vol.Required(CONF_HOST): str,
+                vol.Optional("serial"): str,
+                vol.Optional("confirm_serial", default=False): bool,
+            }
         )
 
     async def async_step_reconfigure(
