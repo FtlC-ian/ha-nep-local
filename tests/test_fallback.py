@@ -92,13 +92,13 @@ async def test_plc_slots_aggregate_and_silent_spares_end_to_end(hass):
         assert [
             (m.slot, m.raw_id)
             for m in (data.inventory.modules[0], data.inventory.modules[-1])
-        ] == [(1, "0X326ED5E0"), (12, "0X326F2770")]
+        ] == [(1, "0X12340000"), (12, "0X12340051")]
         assert len(data.inventory.modules) == 12
         assert "/data/12/min.dat" in requests
         assert data.aggregate.power_w == pytest.approx(30.255)
         assert data.aggregate.today_wh == 611
-        assert data.modules["0X326ED5E0"].reading.power_w == 0
-        assert data.modules["0X326ED5E1"].reading.power_w == pytest.approx(12.993)
+        assert data.modules["0X12340000"].reading.power_w == 0
+        assert data.modules["0X12340001"].reading.power_w == pytest.approx(12.993)
         entities = {
             entity.unique_id: entity
             for entity in er.async_entries_for_config_entry(
@@ -106,12 +106,12 @@ async def test_plc_slots_aggregate_and_silent_spares_end_to_end(hass):
             )
         }
         for raw_id in (
-            "3268C170",
-            "3268C171",
-            "3265F760",
-            "3265F761",
-            "326F2771",
-            "326F2770",
+            "12340020",
+            "12340021",
+            "12340030",
+            "12340031",
+            "12340050",
+            "12340051",
         ):
             assert (
                 hass.states.get(entities[f"TESTGW_0X{raw_id}_power"].entity_id).state
@@ -133,17 +133,17 @@ async def test_plc_slots_aggregate_and_silent_spares_end_to_end(hass):
 
 
 def test_registry_keeps_explicit_indices_and_inventory_identity_format():
-    html = "<input id='plcid0' value='FFFF'><input id='plcid1' value='326ED5E0'><input id='plcid3' value='326EFF30'>"
+    html = "<input id='plcid0' value='FFFF'><input id='plcid1' value='12340000'><input id='plcid3' value='12340010'>"
     modules = parse_module_registry(html)
     assert [(m.slot, m.raw_id) for m in modules] == [
-        (1, "0X326ED5E0"),
-        (3, "0X326EFF30"),
+        (1, "0X12340000"),
+        (3, "0X12340010"),
     ]
     assert modules == parse_module_registry(
         {
             "data": {
-                "Inverter1": {"plcid": "326ED5E0"},
-                "Inverter3": {"plcid": "326EFF30"},
+                "Inverter1": {"plcid": "12340000"},
+                "Inverter3": {"plcid": "12340010"},
             }
         }
     )
@@ -184,13 +184,13 @@ async def test_conflicting_registered_spellings_do_not_split_history(hass):
     entry = MockConfigEntry(domain=DOMAIN, unique_id="TESTGW", data={})
     entry.add_to_hass(hass)
     registry = er.async_get(hass)
-    for raw_id in ("0X326ED5E0", "326ED5E0"):
+    for raw_id in ("0X12340000", "12340000"):
         registry.async_get_or_create(
             "sensor", DOMAIN, f"TESTGW_{raw_id}_status", config_entry=entry
         )
     client = AsyncMock()
     client.inventory.return_value = GatewayInventory(
-        "TESTGW", parse_module_registry("<input id='plcid1' value='326ED5E0'>")
+        "TESTGW", parse_module_registry("<input id='plcid1' value='12340000'>")
     )
     coordinator = NepDataUpdateCoordinator(hass, entry, client)
     await coordinator.async_refresh()
@@ -203,8 +203,8 @@ async def test_fallback_totals_freshness_and_preferred_path_recovery(hass):
     modules = parse_module_registry(
         {
             "data": {
-                "Inverter1": {"plcid": "326ED5E0"},
-                "Inverter2": {"plcid": "326ED5E1"},
+                "Inverter1": {"plcid": "12340000"},
+                "Inverter2": {"plcid": "12340001"},
             }
         }
     )
@@ -245,7 +245,7 @@ async def test_fallback_totals_freshness_and_preferred_path_recovery(hass):
 
 
 @pytest.mark.parametrize(
-    "com_id,seed_key", [("0X326ED5E0", "power"), ("326ED5E0", "status")]
+    "com_id,seed_key", [("0X12340000", "power"), ("12340000", "status")]
 )
 async def test_fallback_restores_registered_entity_history_ids(hass, com_id, seed_key):
     stamp = dt_util.now().replace(tzinfo=None)
@@ -257,7 +257,7 @@ async def test_fallback_restores_registered_entity_history_ids(hass, com_id, see
         if path == "/module/":
             return "<html><div id='box'></div></html>"
         if path == "/module/module.php":
-            return json.dumps({"data": {"Inverter1": {"plcid": "326ED5E0"}}})
+            return json.dumps({"data": {"Inverter1": {"plcid": "12340000"}}})
         if path == "/data/1/min.dat":
             return telemetry
         raise NepResponseMissing()

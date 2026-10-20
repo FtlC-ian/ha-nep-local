@@ -15,7 +15,7 @@ from custom_components.nep_local.exceptions import NepResponseMissing
 async def test_confirmed_manual_serial_allows_fallback_configuration(hass):
     async def get_text(self, path, **kwargs):
         if path == "/module/":
-            return "<input id='plcid1' value='326ED5E0'>"
+            return "<input id='plcid1' value='12340000'>"
         raise NepResponseMissing()
 
     with (
@@ -30,16 +30,16 @@ async def test_confirmed_manual_serial_allows_fallback_configuration(hass):
             context={"source": config_entries.SOURCE_USER},
             data={
                 CONF_HOST: "192.0.2.10",
-                "serial": "21011000024687",
+                "serial": "21000000012345",
                 "confirm_serial": True,
             },
         )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["result"].unique_id == "21011000024687"
+    assert result["result"].unique_id == "21000000012345"
 
 
 @pytest.mark.parametrize(
-    "serial,confirmed", [("typo", True), ("21011000024687", False)]
+    "serial,confirmed", [("typo", True), ("21000000012345", False)]
 )
 async def test_manual_serial_requires_format_and_explicit_confirmation(
     hass, serial, confirmed

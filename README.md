@@ -4,6 +4,12 @@ NEP Local is a Home Assistant custom integration for the local web interface of 
 
 This project is early alpha software tested against one gateway. Gateway firmware variants may expose different local response formats.
 
+## What's new in 0.2.0
+
+- Falls back to per-slot `/data/<n>/min.dat` when the gateway's `/nep/status` inventory and `/total` endpoints stop working.
+- Treats slot 0 as the gateway aggregate and unwired spare inverters as unavailable.
+- Reports lifetime energy as unknown in fallback mode because `min.dat` holds only daily totals.
+
 ## Installation
 
 1. In HACS, add `FtlC-ian/ha-nep-local` as a custom integration repository.
@@ -53,7 +59,7 @@ the same minute. Diagnostic timestamps accompany the cross-check values.
 Unregistered slots are never assigned invented identities or included in sums.
 
 Existing configured entries reuse their gateway serial and registered COM-ID
-spelling, including both prefixed `0X326ED5E0` and unprefixed `326ED5E0` IDs.
+spelling, including both prefixed `0X12340000` and unprefixed `12340000` IDs.
 Entity unique-ID construction is unchanged. New installations can supply the
 optional 14-digit serial number if the overview is dead, with explicit
 confirmation that it matches the gateway label and any existing HA entry;
@@ -95,11 +101,13 @@ equals all channels (1 + 112 + 0 + 42 + 444 + 12 Wh). Slots 1..12 respond;
 slot 13 is missing. Matching AC frequency and temperature pair slots (1,2),
 (3,4), and (9,10), consistent with their dual-input physical COM-ID pairs.
 
+The identifiers below are neutral placeholders; slot relationships are preserved.
+
 ```text
 0 GATEWAY
-1 326ED5E0    2 326ED5E1    3 326EFF30    4 326EFF31
-5 3268C170    6 3268C171    7 3265F760    8 3265F761
-9 326F0891   10 326F0890   11 326F2771   12 326F2770
+1 12340000    2 12340001    3 12340010    4 12340011
+5 12340020    6 12340021    7 12340030    8 12340031
+9 12340040   10 12340041   11 12340050   12 12340051
 ```
 
 The owner confirmed slots 5..8 and 11..12 are unwired spares. Their silent
